@@ -9,11 +9,12 @@ import (
 	"time"
 )
 
-func handleTaskSession(target string, batch bool, username string, password string, domain string, taskname string, description string) {
+func handleTaskSession(target string, batch bool, username string, password string, domain string, taskname string, description string, runas bool) {
+	// TODO - Abstract some of the handles to avoid constant reconnection
 	if taskname == "" {
 		taskname = getRandomString(18)
 	}
-	err := createRemoteScheduledTask(target, taskname, username, password, domain, description)
+	err := createRemoteScheduledTask(target, taskname, username, password, domain, description, runas)
 	if err != nil {
 		fmt.Printf("Failed to create task: %v\n", err)
 		return
@@ -50,7 +51,7 @@ func handleTaskSession(target string, batch bool, username string, password stri
 			f.Close()
 			cmd = fmt.Sprintf("%s", batchFile)
 		}
-		err = runTask(target, taskname, username, password, domain, cmd)
+		err = runTask(target, taskname, username, password, domain, cmd, runas)
 		if err != nil {
 			if err.Error() != "The service did not respond to the start or control request in a timely fashion." {
 				fmt.Println(err.Error())
@@ -67,11 +68,16 @@ func handleTaskSession(target string, batch bool, username string, password stri
 		for _, v := range c {
 			fmt.Println(v)
 		}
+		// Now we delete the output file
+		err = deleteFile(outputFile)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
 	}
 
 }
 
-func createRemoteScheduledTask(hostname, taskName, username, password, domain, description string) error {
+func createRemoteScheduledTask(hostname, taskName, username, password, domain, description string, runas bool) error {
 	ole.CoInitialize(0)
 	defer ole.CoUninitialize()
 
@@ -126,9 +132,17 @@ func createRemoteScheduledTask(hostname, taskName, username, password, domain, d
 	}
 	principal := principalDisp.ToIDispatch()
 	//oleutil.PutProperty(principal, "LogonType", 3) // TASK_LOGON_INTERACTIVE_TOKEN
-	oleutil.PutProperty(principal, "UserId", "SYSTEM")
-	oleutil.PutProperty(principal, "LogonType", 5) // TASK_LOGON_SERVICE_ACCOUNT
-	oleutil.PutProperty(principal, "RunLevel", 1)  // TASK_RUNLEVEL_HIGHEST
+	runasUser := fmt.Sprintf("%s\\%s", domain, username)
+	if runas {
+		oleutil.PutProperty(principal, "UserId", runasUser)
+		oleutil.PutProperty(principal, "LogonType", 1) // TASK_LOGON_PASSWORD
+		oleutil.PutProperty(principal, "RunLevel", 1)  // TASK_RUNLEVEL_HIGHEST
+	} else {
+		oleutil.PutProperty(principal, "UserId", "SYSTEM")
+		oleutil.PutProperty(principal, "LogonType", 5) // TASK_LOGON_SERVICE_ACCOUNT
+		oleutil.PutProperty(principal, "RunLevel", 1)  // TASK_RUNLEVEL_HIGHEST
+	}
+
 	principal.Release()
 
 	// RegistrationInfo (optional)
@@ -177,17 +191,31 @@ func createRemoteScheduledTask(hostname, taskName, username, password, domain, d
 
 	// Register task
 	var registeredTask *ole.VARIANT
-	registeredTask, err = oleutil.CallMethod(
-		rootFolder,
-		"RegisterTaskDefinition",
-		taskName,
-		taskDef,
-		6,   // TASK_CREATE_OR_UPDATE | TASK_RUN
-		nil, // No user
-		nil, // No password
-		5,   // TASK_LOGON_SERVICE_ACCOUNT
-		"",
-	)
+	if runas {
+		registeredTask, err = oleutil.CallMethod(
+			rootFolder,
+			"RegisterTaskDefinition",
+			taskName,
+			taskDef,
+			6, // TASK_CREATE_OR_UPDATE | TASK_RUN
+			runasUser,
+			password,
+			1, // TASK_LOGON_PASSWORD
+			"",
+		)
+	} else {
+		registeredTask, err = oleutil.CallMethod(
+			rootFolder,
+			"RegisterTaskDefinition",
+			taskName,
+			taskDef,
+			6,   // TASK_CREATE_OR_UPDATE | TASK_RUN
+			nil, // No user
+			nil, // No password
+			5,   // TASK_LOGON_SERVICE_ACCOUNT
+			"",
+		)
+	}
 	if err != nil {
 		if comErr, ok := err.(*ole.OleError); ok {
 			return fmt.Errorf("failed to register task: HRESULT 0x%X (%v)", comErr.Code(), comErr)
@@ -199,23 +227,7 @@ func createRemoteScheduledTask(hostname, taskName, username, password, domain, d
 	return nil
 }
 
-func runTask(hostname, taskName, username, password, domain, command string) error {
-	// Retrieve task instance
-	/*	taskDisp, err := oleutil.CallMethod(rootFolder, "GetTask", taskName)
-		if err != nil {
-			return fmt.Errorf("failed to get task: %v", err)
-		}
-		task := taskDisp.ToIDispatch()
-		defer task.Release()
-
-		// Run task
-		runningDisp, err := oleutil.CallMethod(task, "Run", nil)
-		if err != nil {
-			return fmt.Errorf("failed to run task: %v", err)
-		}
-		running := runningDisp.ToIDispatch()
-		defer running.Release()*/
-
+func runTask(hostname, taskName, username, password, domain, command string, runas bool) error {
 	ole.CoInitialize(0)
 	defer ole.CoUninitialize()
 
@@ -298,19 +310,36 @@ func runTask(hostname, taskName, username, password, domain, command string) err
 	oleutil.PutProperty(action, "Arguments", fmt.Sprintf("/c %s", command))
 
 	// Re-register the updated task (TASK_CREATE | TASK_UPDATE = 6)
-	_, err = oleutil.CallMethod(
-		rootFolder,
-		"RegisterTaskDefinition",
-		taskName,
-		definition,
-		6,   // TASK_CREATE_OR_UPDATE
-		nil, // No user
-		nil, // No password
-		5,   // Use existing logon type (e.g., TASK_LOGON_SERVICE_ACCOUNT)
-		"",
-	)
+	if runas {
+		_, err = oleutil.CallMethod(
+			rootFolder,
+			"RegisterTaskDefinition",
+			taskName,
+			definition,
+			6, // TASK_CREATE_OR_UPDATE | TASK_RUN
+			fmt.Sprintf("%s\\%s", domain, username),
+			password,
+			1, // TASK_LOGON_PASSWORD
+			"",
+		)
+	} else {
+		_, err = oleutil.CallMethod(
+			rootFolder,
+			"RegisterTaskDefinition",
+			taskName,
+			definition,
+			6,   // TASK_CREATE_OR_UPDATE | TASK_RUN
+			nil, // No user
+			nil, // No password
+			5,   // TASK_LOGON_SERVICE_ACCOUNT
+			"",
+		)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to update task definition: %v", err)
+		if comErr, ok := err.(*ole.OleError); ok {
+			return fmt.Errorf("failed to register task: HRESULT 0x%X (%v)", comErr.Code(), comErr)
+		}
+		return fmt.Errorf("failed to register task: %v", err)
 	}
 
 	// Run the updated task
@@ -321,7 +350,6 @@ func runTask(hostname, taskName, username, password, domain, command string) err
 	running := runningDisp.ToIDispatch()
 	defer running.Release()
 
-	// Optionally wait until it completes
 	for {
 		_, _ = oleutil.CallMethod(running, "Refresh") // This is, allegedly, called automatically prior to checking State property but it seems to not work properly
 
