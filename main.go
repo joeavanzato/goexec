@@ -1,10 +1,14 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"slices"
 )
+
+//go:embed gopipe.exe
+var pipebin []byte
 
 func main() {
 	args, err := parseArgs()
@@ -21,6 +25,7 @@ func main() {
 	name := args["name"].(string)
 	runas := args["runas"].(bool)
 	description := args["description"].(string)
+	dropmethod := args["dropmethod"].(string)
 
 	fmt.Println("Target:", target)
 
@@ -40,7 +45,7 @@ func main() {
 
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
-
+		handlePipeSession(target, username, password, domain, name, dropmethod)
 	} else if method == "http" {
 		// Enter full-interactive shell using HTTP Client/Server
 
@@ -59,10 +64,16 @@ func parseArgs() (map[string]any, error) {
 	password := flag.String("pass", "", "Password for remote authentication")
 	domain := flag.String("domain", "", "Domain for remote authentication - should be FQDN such as domain.com or similar - if blank and user is specified will assume local user")
 
-	// Service, Task
-	name := flag.String("name", "", "Service/Task name to use for remote execution - if blank, will generate a random name")
+	// Evasion
+	// diskshadow - https://bohops.com/2018/03/26/diskshadow-the-return-of-vss-evasion-persistence-and-active-directory-database-extraction/
+	evasion := flag.String("evasion", "", "conhost, diskshadow, ftp")
+
+	// Service, Task, Pipe parameters
+	name := flag.String("name", "", "Service/Task/Pipe name to use for remote execution - if blank, will generate a random name")
 	description := flag.String("description", "", "Description for the service/task - if blank, will use a default description")
 	runas := flag.Bool("runas", false, "If true, will run the task as the user specified in -user flag instead of SYSTEM - specified user must have Batch Job Rights")
+
+	dropmethod := flag.String("dropmethod", "wmi", "Method to use for creating named pipe (wmi, task, service)")
 
 	flag.Parse()
 
@@ -89,6 +100,8 @@ func parseArgs() (map[string]any, error) {
 		"name":        *name,
 		"description": *description,
 		"runas":       *runas,
+		"evasion":     *evasion,
+		"dropmethod":  *dropmethod,
 	}
 	return arguments, nil
 }
