@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
+	"log"
 	"os"
 	"time"
 )
@@ -14,6 +15,20 @@ func handleTaskSession(target string, batch bool, username string, password stri
 	if taskname == "" {
 		taskname = getRandomString(18)
 	}
+	settings := &Settings{
+		User:        fmt.Sprintf("%s\\%s", domain, username),
+		Password:    password,
+		TargetShare: "ADMIN$",
+		Target:      target,
+	}
+
+	if !EstablishConnection(settings, "C$", true) {
+		fmt.Printf("failed to establish connection to C$ share on %s", settings.Target)
+		return
+	}
+	defer EstablishConnection(settings, "C$", false)
+	log.Printf("Successfully connected to C$ share on %s\n", target)
+
 	err := createRemoteScheduledTask(target, taskname, username, password, domain, description, runas)
 	if err != nil {
 		fmt.Printf("Failed to create task: %v\n", err)
@@ -36,9 +51,11 @@ func handleTaskSession(target string, batch bool, username string, password stri
 			fmt.Println()
 			continue
 		}
-		outputFile := fmt.Sprintf("\\\\%s\\C$\\Windows\\Temp\\%s.txt", target, getRandomString(12))
+		outputFileBase := fmt.Sprintf("Windows\\Temp\\%s.txt", getRandomString(12))
+		outputFile := fmt.Sprintf("\\\\%s\\C$\\%s", target, outputFileBase)
 		cmd := fmt.Sprintf("%s > %s 2>&1", command, outputFile)
-		batchFile := fmt.Sprintf("\\\\%s\\C$\\Windows\\Temp\\%s.bat", target, getRandomString(18))
+		batchFileBase := fmt.Sprintf("Windows\\Temp\\%s", target, getRandomString(18))
+		batchFile := fmt.Sprintf("\\\\%s\\C$\\%s", target, batchFileBase)
 		if batch {
 			// Make a batch file on the target at C:\Windows\Temp and then we will pass a command to execute this
 			f, err := os.Create(batchFile)
@@ -49,9 +66,10 @@ func handleTaskSession(target string, batch bool, username string, password stri
 			// "C:\Windows\System32\cmd.exe /k start /b /wait \\127.0.0.1\C$\Windows\Temp\1.bat & timeout /t 10"
 			f.WriteString(fmt.Sprintf("%s > %s 2>&1", command, outputFile))
 			f.Close()
+
 			cmd = fmt.Sprintf("%s", batchFile)
 		}
-		err = runTask(target, taskname, username, password, domain, cmd, runas)
+		err = runTask(target, taskname, username, password, domain, cmd, runas, false)
 		if err != nil {
 			if err.Error() != "The service did not respond to the start or control request in a timely fashion." {
 				fmt.Println(err.Error())
@@ -60,6 +78,7 @@ func handleTaskSession(target string, batch bool, username string, password stri
 		}
 		// run task waits until complete so we should be good to check output immediately
 		// We loop and check service status every X time period waiting for completion
+		// When we aren't using explicit credentials for SMB transfers
 		c, err := readFileToSlice(outputFile)
 		if err != nil {
 			fmt.Println(err.Error())
@@ -73,6 +92,7 @@ func handleTaskSession(target string, batch bool, username string, password stri
 		if err != nil {
 			fmt.Println(err.Error())
 		}
+
 	}
 
 }
@@ -227,7 +247,7 @@ func createRemoteScheduledTask(hostname, taskName, username, password, domain, d
 	return nil
 }
 
-func runTask(hostname, taskName, username, password, domain, command string, runas bool) error {
+func runTask(hostname, taskName, username, password, domain, command string, runas, skipcheck bool) error {
 	ole.CoInitialize(0)
 	defer ole.CoUninitialize()
 
@@ -350,6 +370,9 @@ func runTask(hostname, taskName, username, password, domain, command string, run
 	running := runningDisp.ToIDispatch()
 	defer running.Release()
 
+	if skipcheck {
+		return nil
+	}
 	for {
 		_, _ = oleutil.CallMethod(running, "Refresh") // This is, allegedly, called automatically prior to checking State property but it seems to not work properly
 
