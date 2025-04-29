@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
+	"log"
 	"os"
 	"time"
 )
+
+// TODO - Authenticated SMB Reads
 
 var wmiReturnValues = map[int]string{
 	0:  "Success",
@@ -107,6 +110,7 @@ func handleWMISession(target string, batch bool, username string, password strin
 }
 
 func executeRemoteWMI(remoteHost, command, dir, username, password, domain string) error {
+	// TODO - Incorporate runas to run as specified user or as SYSTEM
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
 		return fmt.Errorf("failed to initialize COM: %v", err)
 	}
@@ -153,6 +157,36 @@ func executeRemoteWMI(remoteHost, command, dir, username, password, domain strin
 	}
 	service := serviceRaw.ToIDispatch()
 	defer service.Release()
+
+	// These were attempts to run as system
+	/*	// Grab the SWbemSecurity object
+		secRaw, err := oleutil.GetProperty(service, "Security_")
+		if err != nil {
+			return fmt.Errorf("failed to get Security_: %v", err)
+		}
+		security := secRaw.ToIDispatch()
+		defer security.Release()
+		// wbemImpersonationLevelImpersonate = 3
+		if _, err = oleutil.PutProperty(security, "ImpersonationLevel", 2); err != nil {
+			return fmt.Errorf("failed to set impersonation level: %v", err)
+		}*/
+
+	/*	privsRaw, err := oleutil.GetProperty(security, "Privileges")
+		if err != nil {
+			return fmt.Errorf("failed to get Privileges collection: %v", err)
+		}
+		privs := privsRaw.ToIDispatch()
+		defer privs.Release()
+
+		for _, name := range []string{
+			"SeCreateTokenPrivilege",
+			"SeAssignPrimaryTokenPrivilege",
+			"SeIncreaseQuotaPrivilege",
+		} {
+			if _, err := oleutil.CallMethod(privs, "AddAsString", name, true); err != nil {
+				return fmt.Errorf("failed to enable %s: %v", name, err)
+			}
+		}*/
 
 	// Get Win32_Process class
 	processClassRaw, err := oleutil.CallMethod(service, "Get", "Win32_Process")
@@ -207,6 +241,6 @@ func executeRemoteWMI(remoteHost, command, dir, username, password, domain strin
 		return fmt.Errorf("WMI process creation failed, return code: %d", returnCode)
 	}
 
-	fmt.Printf("Successfully launched process with PID: %d\n", pid.Val)
+	log.Printf("Successfully launched process with PID: %d\n", pid.Val)
 	return nil
 }
