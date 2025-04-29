@@ -29,6 +29,32 @@ func main() {
 
 	fmt.Println("Target:", target)
 
+	/*	var smbsession *smb2.Session
+		var smbconn net.Conn
+		var cshare *smb2.Share
+		if username != "" {
+			smbsession, smbconn, err = getAuthenticatedSMBSession(username, password, domain, target)
+			if err != nil {
+				fmt.Printf("Failed to authenticate to SMB share: %v\n", err)
+				return
+			}
+			smbsession.WithContext(context.Background())
+			cshare, err = smbsession.Mount("C$")
+			if err != nil {
+				fmt.Printf("Failed to mount SMB share: %v\n", err)
+				return
+			}
+			ipcshare, err := smbsession.Mount("IPC$")
+			if err != nil {
+				fmt.Printf("Failed to mount SMB share: %v\n", err)
+				return
+			}
+			defer ipcshare.Umount()
+			defer cshare.Umount()
+			defer smbsession.Logoff()
+			defer smbconn.Close()
+		}*/
+
 	if method == "wmi" {
 		// Enter pseudo-interactive shell using WMI Process Creations
 		// Supports username/password for authentication - must supply domain
@@ -41,14 +67,13 @@ func main() {
 
 	} else if method == "service" {
 		// Enter psuedo-interactive shell using Service Control Manager
-		handleServiceSession(target, batch, username, password, domain, name, description)
+		handleServiceSession(target, batch, username, password, domain, name, description, runas)
 
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
-		handlePipeSession(target, username, password, domain, name, dropmethod)
+		handlePipeSession(target, username, password, domain, name, dropmethod, runas)
 	} else if method == "http" {
 		// Enter full-interactive shell using HTTP Client/Server
-
 	}
 
 }
