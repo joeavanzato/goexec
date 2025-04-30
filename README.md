@@ -6,6 +6,8 @@ Can be launched from non-domain devices with explicitly specified credentials to
 
 Can also be launched without credentials to runas the current process user (assuming appropriate access on the target).
 
+Not all features of PsExec/PaExec are implemented, such as running within specified user sessions.
+
 Examples and Usage are provided below.
 
 ### Features
