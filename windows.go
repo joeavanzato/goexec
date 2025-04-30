@@ -30,6 +30,7 @@ var (
 	procLogonUserW              = modadvapi32.NewProc("LogonUserW")
 	procImpersonateLoggedOn     = modadvapi32.NewProc("ImpersonateLoggedOnUser")
 	procDuplicateTokenEx        = modadvapi32.NewProc("DuplicateTokenEx")
+	procOpenProcessToken        = modadvapi32.NewProc("OpenProcessToken")
 	procImpersonateLoggedOnUser = modadvapi32.NewProc("ImpersonateLoggedOnUser")
 	procRevertToSelf            = modadvapi32.NewProc("RevertToSelf")
 
