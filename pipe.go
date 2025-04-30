@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"regexp"
 	"syscall"
 	"time"
 )
@@ -244,12 +243,6 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 
 	// Wait for either goroutine to finish
 	<-ctx.Done()
-}
-
-var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-
-func stripANSI(input []byte) []byte {
-	return ansiEscape.ReplaceAll(input, nil)
 }
 
 // sendTerminalSize gets the current terminal size and sends the ANSI resize command
