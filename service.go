@@ -272,6 +272,99 @@ func CreateRemoteService(machineName, serviceName, displayName, description, bin
 	return nil
 }
 
+func deleteRemoteService(target, user, password, domain, servicename string) error {
+	// Open Service Control Manager on remote machine
+	var token syscall.Handle
+	var err error
+	if password != "" {
+		// Explicit user context
+		token, err = logonUser(user, domain, password)
+		if err != nil {
+			return err
+		}
+	} else {
+		var r1 uintptr
+		// Default user context
+		process, err := syscall.GetCurrentProcess()
+		if err != nil {
+			return fmt.Errorf("failed to get current process: %v", err)
+		}
+		r1, _, err = procOpenProcessToken.Call(
+			uintptr(process),
+			syscall.TOKEN_QUERY|syscall.TOKEN_DUPLICATE|syscall.TOKEN_ADJUST_PRIVILEGES,
+			uintptr(unsafe.Pointer(&token)),
+		)
+		if r1 == 0 {
+			return fmt.Errorf("failed to open process token: %v (Error code: %d)", err, syscall.GetLastError())
+		}
+	}
+	defer syscall.CloseHandle(token)
+
+	// Open SCM
+	if err = impersonateUser(token); err != nil {
+		return err
+	}
+	defer revertToSelf()
+	scmHandle, _, err := procOpenSCManagerW.Call(
+		uintptr(unsafe.Pointer(UTF16PtrFromString(target))),
+		uintptr(unsafe.Pointer(UTF16PtrFromString("ServicesActive"))),
+		uintptr(SC_MANAGER_ALL_ACCESS),
+	)
+	if scmHandle == 0 {
+		return fmt.Errorf("Failed to open Service Control Manager: %v (Error code: %d)\n", err, syscall.GetLastError())
+	}
+	defer procCloseServiceHandle.Call(scmHandle)
+
+	// Check if service already exists and try to open it
+	serviceHandle, _, _ := procOpenServiceW.Call(
+		scmHandle,
+		uintptr(unsafe.Pointer(UTF16PtrFromString(servicename))),
+		uintptr(SERVICE_ALL_ACCESS),
+	)
+
+	if serviceHandle != 0 {
+		// Service exists, attempt to stop it first if it's running
+		// Then we just return since we already
+		var serviceStatus SERVICE_STATUS
+		procQueryServiceStatus.Call(serviceHandle, uintptr(unsafe.Pointer(&serviceStatus)))
+
+		if serviceStatus.DwCurrentState != SERVICE_STOPPED {
+			log.Printf("Service '%s' is running, attempting to stop it\n", servicename)
+			success, _, stopErr := procControlService.Call(
+				serviceHandle,
+				uintptr(SERVICE_CONTROL_STOP),
+				uintptr(unsafe.Pointer(&serviceStatus)),
+			)
+
+			if success == 0 {
+				log.Printf("Warning: Failed to stop service: %v\n", stopErr)
+			} else {
+				// Wait for service to stop (with timeout)
+				stopTimeout := time.Now().Add(30 * time.Second)
+				for serviceStatus.DwCurrentState != SERVICE_STOPPED {
+					if time.Now().After(stopTimeout) {
+						log.Printf("Warning: Timeout waiting for service to stop\n")
+						break
+					}
+
+					time.Sleep(500 * time.Millisecond)
+					procQueryServiceStatus.Call(serviceHandle, uintptr(unsafe.Pointer(&serviceStatus)))
+				}
+			}
+		}
+
+		success, _, deleteErr := procDeleteService.Call(
+			serviceHandle,
+		)
+		if success == 0 {
+			log.Printf("Warning: Failed to stop service: %v\n", deleteErr)
+		}
+		return nil
+	}
+	// Service does not exist
+	return nil
+}
+
 func executeRemoteService(target string, cmd string, user string, password string, domain string, servicename string) error {
 	// Open Service Control Manager on remote machine
 	var token syscall.Handle
@@ -394,11 +487,11 @@ func checkServiceState(target string, user string, password string, domain strin
 	return ServiceStateToString(serviceStatus.DwCurrentState), nil
 }
 
-func handleServiceSession(target string, batch bool, username string, password string, domain string, servicename string, description string, runas bool) {
+func handleServiceSession(target string, batch bool, username string, password string, domain string, servicename string, description string, runas bool, nodelete bool) {
 	if servicename == "" {
 		servicename = getRandomString(12)
 	}
-	err := CreateRemoteService(target, servicename, servicename, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", username, password, domain, runas)
+	err := CreateRemoteService(target, servicename, servicename, description, "cmd.exe /c cmd.exe", username, password, domain, runas)
 	if err != nil {
 		fmt.Printf("Failed to create service: %v\n", err)
 		return
@@ -477,11 +570,26 @@ func handleServiceSession(target string, batch bool, username string, password s
 				for _, v := range c {
 					fmt.Println(v)
 				}
-				// TODO - Delete File and Batch
+				if batch {
+					err = os.Remove(batchFile)
+					if err != nil {
+						fmt.Printf("Failed to delete batch file: %v\n", err)
+					}
+				}
+				err = os.Remove(outputFile)
+				if err != nil {
+					fmt.Printf("Failed to delete output file: %v\n", err)
+				}
 				break
 			}
 
 		}
 	}
-	// TODO - Delete Service
+	if !nodelete {
+		err = deleteRemoteService(target, username, password, domain, servicename)
+		if err != nil {
+			log.Printf("Failed to delete service: %v\n", err)
+		}
+	}
+
 }

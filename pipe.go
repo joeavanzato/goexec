@@ -26,7 +26,7 @@ type Settings struct {
 	Pipe                  string
 }
 
-func handlePipeSession(target, user, pass, domain, name, dropmethod string, runas, nodelete bool) {
+func handlePipeSession(target, user, pass, domain, name, dropmethod string, runas, nodelete bool, description string) {
 	pipePath := ""
 	random := getRandomString(12)
 	if name == "" {
@@ -86,7 +86,7 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 			return
 		}
 	} else if dropmethod == "task" {
-		err := createRemoteScheduledTask(target, name, user, pass, domain, "Bluetooth Controller for Samsung Devices", runas)
+		err := createRemoteScheduledTask(target, name, user, pass, domain, description, runas)
 		if err != nil {
 			fmt.Printf("Failed to create task: %v\n", err)
 			return
@@ -103,7 +103,7 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 		}
 		// TODO - Check actual task status here
 	} else if dropmethod == "service" {
-		err := CreateRemoteService(target, name, name, "Bluetooth controller for XAIE", "cmd.exe /c cmd.exe", user, pass, domain, runas)
+		err := CreateRemoteService(target, name, name, description, "cmd.exe /c cmd.exe", user, pass, domain, runas)
 		if err != nil {
 			fmt.Printf("Failed to create service: %v\n", err)
 			return
@@ -247,6 +247,15 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 
 	// Wait for either goroutine to finish
 	<-ctx.Done()
+
+	if dropmethod == "service" {
+		if !nodelete {
+			err = deleteRemoteService(target, user, pass, domain, name)
+			if err != nil {
+				log.Printf("Failed to delete service: %v\n", err)
+			}
+		}
+	}
 }
 
 // sendTerminalSize gets the current terminal size and sends the ANSI resize command

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func handleTaskSession(target string, batch bool, username string, password string, domain string, taskname string, description string, runas bool) {
+func handleTaskSession(target string, batch bool, username string, password string, domain string, taskname string, description string, runas bool, nodelete bool) {
 	if taskname == "" {
 		taskname = getRandomString(18)
 	}
@@ -97,9 +97,70 @@ func handleTaskSession(target string, batch bool, username string, password stri
 		if err != nil {
 			fmt.Println(err.Error())
 		}
-
 	}
 
+	if !nodelete {
+		err = deleteRemoteScheduledTask(target, taskname, username, password, domain)
+		if err != nil {
+			fmt.Printf("Failed to delete task: %v\n", err)
+		}
+	}
+
+}
+
+func deleteRemoteScheduledTask(hostname, taskName, username, password, domain string) error {
+	ole.CoInitialize(0)
+	defer ole.CoUninitialize()
+
+	unknown, err := oleutil.CreateObject("Schedule.Service")
+	if err != nil {
+		return fmt.Errorf("failed to create Schedule.Service: %v", err)
+	}
+	defer unknown.Release()
+
+	service, err := unknown.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return fmt.Errorf("failed to query IDispatch: %v", err)
+	}
+	defer service.Release()
+
+	// Connect to the remote host
+	if hostname == "." || hostname == "localhost" || hostname == "127.0.0.1" {
+		_, err = oleutil.CallMethod(service, "Connect") // localhost
+	} else if username == "" {
+		_, err = oleutil.CallMethod(service, "Connect", hostname)
+	} else {
+		_, err = oleutil.CallMethod(
+			service,
+			"Connect",
+			hostname, // strServer
+			username, // strUser
+			domain,   // strDomain
+			password, // strPassword
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to connect to remote host %s: %v", hostname, err)
+	}
+
+	// Get the root folder
+	rootFolderDisp, err := oleutil.CallMethod(service, "GetFolder", `\`)
+	if err != nil {
+		return fmt.Errorf("failed to get root folder: %v", err)
+	}
+	rootFolder := rootFolderDisp.ToIDispatch()
+	defer rootFolder.Release()
+
+	// Delete the task
+	_, err = oleutil.CallMethod(rootFolder, "DeleteTask", taskName, 0)
+	if err != nil {
+		if comErr, ok := err.(*ole.OleError); ok {
+			return fmt.Errorf("failed to delete task: HRESULT 0x%X (%v)", comErr.Code(), comErr)
+		}
+		return fmt.Errorf("failed to delete task: %v", err)
+	}
+
+	return nil
 }
 
 func createRemoteScheduledTask(hostname, taskName, username, password, domain, description string, runas bool) error {
