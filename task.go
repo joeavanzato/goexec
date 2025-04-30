@@ -13,15 +13,18 @@ import (
 )
 
 func handleTaskSession(target string, batch bool, username string, password string, domain string, taskname string, description string, runas bool) {
-	// TODO - Abstract some of the handles to avoid constant reconnection
 	if taskname == "" {
 		taskname = getRandomString(18)
 	}
 	settings := &Settings{
-		User:        fmt.Sprintf("%s\\%s", domain, username),
-		Password:    password,
-		TargetShare: "ADMIN$",
-		Target:      target,
+		User:          fmt.Sprintf("%s\\%s", domain, username),
+		Password:      password,
+		TargetShare:   "ADMIN$",
+		Target:        target,
+		UserSpecified: false,
+	}
+	if username != "" {
+		settings.UserSpecified = true
 	}
 
 	if !EstablishConnection(settings, "C$", true) {
@@ -118,7 +121,7 @@ func createRemoteScheduledTask(hostname, taskName, username, password, domain, d
 	if hostname == "." || hostname == "localhost" || hostname == "127.0.0.1" {
 		_, err = oleutil.CallMethod(service, "Connect") // localhost
 	} else if username == "" {
-		_, err = oleutil.CallMethod(service, "Connect", hostname, "root\\cimv2")
+		_, err = oleutil.CallMethod(service, "Connect", hostname)
 	} else {
 		_, err = oleutil.CallMethod(
 			service,
@@ -268,7 +271,7 @@ func runTask(hostname, taskName, username, password, domain, command string, run
 	if hostname == "." || hostname == "localhost" || hostname == "127.0.0.1" {
 		_, err = oleutil.CallMethod(service, "Connect") // localhost
 	} else if username == "" {
-		_, err = oleutil.CallMethod(service, "Connect", hostname, "root\\cimv2")
+		_, err = oleutil.CallMethod(service, "Connect", hostname)
 	} else {
 		_, err = oleutil.CallMethod(
 			service,
