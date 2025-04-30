@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// TODO - Authenticated SMB Reads
+// TODO - Consider storing output in WMI class instead of on disk - https://github.com/OneScripter/WmiExec/blob/main/WmiExec.ps1
 
 var wmiReturnValues = map[int]string{
 	0:  "Success",
