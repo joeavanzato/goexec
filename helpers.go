@@ -247,6 +247,16 @@ func createNullDaclSD() ([]byte, error) {
 	return sd, nil
 }
 
+func reverseByteSliceCopy(s []byte) []byte {
+	newSlice := make([]byte, len(s))
+	copy(newSlice, s)
+
+	for i, j := 0, len(newSlice)-1; i < j; i, j = i+1, j-1 {
+		newSlice[i], newSlice[j] = newSlice[j], newSlice[i]
+	}
+	return newSlice
+}
+
 // Split username into user and domain parts
 func splitUserNameAndDomain(fullUsername string) (string, string) {
 	parts := strings.SplitN(fullUsername, "\\", 2)
