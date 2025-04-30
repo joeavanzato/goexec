@@ -1,6 +1,9 @@
 package main
 
 // TODO - Reduce code duplication across modules
+// TODO - Automatically delete old Tasks/Services with option to preserve (-nodelete)
+// TODO - For WMI, Incorporate runas - right now everything runs as the user in question, default should be SYSTEM
+// TODO - Reduce code reuse/complexity - abstract components to higher level
 
 import (
 	_ "embed"
@@ -34,6 +37,7 @@ func main() {
 	port := args["port"].(int)
 	ip := args["ip"].(string)
 	shell := args["shell"].(string)
+	nodelete := args["nodelete"].(bool)
 
 	log.Printf("Target: %s, Method: %s\n", target, method)
 
@@ -77,10 +81,10 @@ func main() {
 		handleServiceSession(target, batch, username, password, domain, name, description, runas)
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
-		handlePipeSession(target, username, password, domain, name, dropmethod, runas)
+		handlePipeSession(target, username, password, domain, name, dropmethod, runas, nodelete)
 	} else if method == "tcp" {
 		// Enter full-interactive shell using TCP Client/Server - can be bind or reverse shell
-		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port)
+		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port, nodelete)
 	}
 
 }
@@ -106,9 +110,10 @@ func parseArgs() (map[string]any, error) {
 	runas := flag.Bool("runas", false, "If true, will run the task as the user specified in -user flag instead of SYSTEM assuming the user has the correct permissions - does NOT work yet for WMI which will always run as specified user")
 	dropmethod := flag.String("dropmethod", "wmi", "Method to use for creating named pipe (wmi, task, service)")
 	reverse := flag.Bool("reverse", false, "If true, will create a reverse shell instead of bind shell - for TCP mode - must specify port")
-	port := flag.Int("port", 8859, "Port to use for TCP shells - must specify port if using TCP mode - default is 4444")
-	ip := flag.String("ip", "1.1.1.1", "IP to use for TCP reverse shells")
+	port := flag.Int("port", 0, "Port to use for TCP shells - must specify port if using TCP mode")
+	ip := flag.String("ip", "0.0.0.0", "IP to use for TCP reverse shells")
 	shell := flag.String("shell", "cmd", "Shell to use for TCP shells - default is cmd.exe, valid options are (cmd, ps)")
+	nodelete := flag.Bool("nodelete", false, "If true, will not delete the task/service after execution - useful to avoid constantly creating new tasks/services if reconnecting multiple times")
 	flag.Parse()
 
 	validMethods := []string{"wmi", "task", "service", "pipe", "tcp"}
@@ -135,8 +140,21 @@ func parseArgs() (map[string]any, error) {
 	}
 
 	if *method == "tcp" {
-		if *reverse && *ip == "1.1.1.1" {
-			return nil, fmt.Errorf("IP is required if reverse shell is specified")
+		if *port == 0 {
+			return nil, fmt.Errorf("port is required for TCP")
+		}
+		if *reverse && *ip == "0.0.0.0" {
+			return nil, fmt.Errorf("IP is required with reverse shells for connect-back target")
+		}
+	}
+
+	if *port != 0 && *method != "tcp" {
+		return nil, fmt.Errorf("port is only valid for TCP method")
+	}
+
+	if *method == "service" || ((*method == "pipe" || *method == "tcp") && *dropmethod == "service") {
+		if *runas && *password == "" {
+			return nil, fmt.Errorf("password is required to install a 'runas' service")
 		}
 	}
 
@@ -156,6 +174,7 @@ func parseArgs() (map[string]any, error) {
 		"port":        *port,
 		"ip":          *ip,
 		"shell":       *shell,
+		"nodelete":    *nodelete,
 	}
 	return arguments, nil
 }
