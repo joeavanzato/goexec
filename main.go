@@ -129,11 +129,6 @@ func parseArgs() (map[string]any, error) {
 	if !slices.Contains(validShells, *shell) {
 		return nil, fmt.Errorf("invalid shell: %s", *shell)
 	}
-	if *shell == "ps" {
-		*shell = "powershell.exe"
-	} else if *shell == "cmd" {
-		*shell = "cmd.exe"
-	}
 
 	if *target == "" {
 		return nil, fmt.Errorf("target is required")
