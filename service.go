@@ -135,10 +135,31 @@ func ServiceStateToString(state uint32) string {
 // Called during setup to prepare a service for use
 func CreateRemoteService(machineName, serviceName, displayName, description, binPath, username, password, domain string, runas bool) error {
 	// Open Service Control Manager on remote machine
-	token, err := logonUser(username, domain, password)
-	if err != nil {
-		return err
+	var token syscall.Handle
+	var err error
+	if password != "" {
+		// Explicit user context
+		token, err = logonUser(username, domain, password)
+		if err != nil {
+			return err
+		}
+	} else {
+		var r1 uintptr
+		// Default user context
+		process, err := syscall.GetCurrentProcess()
+		if err != nil {
+			return fmt.Errorf("failed to get current process: %v", err)
+		}
+		r1, _, err = procOpenProcessToken.Call(
+			uintptr(process),
+			syscall.TOKEN_QUERY|syscall.TOKEN_DUPLICATE|syscall.TOKEN_ADJUST_PRIVILEGES,
+			uintptr(unsafe.Pointer(&token)),
+		)
+		if r1 == 0 {
+			return fmt.Errorf("failed to open process token: %v (Error code: %d)", err, syscall.GetLastError())
+		}
 	}
+
 	defer syscall.CloseHandle(token)
 
 	if err = impersonateUser(token); err != nil {
@@ -202,7 +223,7 @@ func CreateRemoteService(machineName, serviceName, displayName, description, bin
 	// Create the new service
 	lpServiceStartName := uintptr(0)
 	lpPassword := uintptr(0)
-	if runas {
+	if runas && password != "" {
 		lpServiceStartName = uintptr(unsafe.Pointer(UTF16PtrFromString(fmt.Sprintf("%s\\%s", domain, username))))
 		lpPassword = uintptr(unsafe.Pointer(UTF16PtrFromString(password)))
 	}
@@ -253,9 +274,29 @@ func CreateRemoteService(machineName, serviceName, displayName, description, bin
 
 func executeRemoteService(target string, cmd string, user string, password string, domain string, servicename string) error {
 	// Open Service Control Manager on remote machine
-	token, err := logonUser(user, domain, password)
-	if err != nil {
-		return err
+	var token syscall.Handle
+	var err error
+	if password != "" {
+		// Explicit user context
+		token, err = logonUser(user, domain, password)
+		if err != nil {
+			return err
+		}
+	} else {
+		var r1 uintptr
+		// Default user context
+		process, err := syscall.GetCurrentProcess()
+		if err != nil {
+			return fmt.Errorf("failed to get current process: %v", err)
+		}
+		r1, _, err = procOpenProcessToken.Call(
+			uintptr(process),
+			syscall.TOKEN_QUERY|syscall.TOKEN_DUPLICATE|syscall.TOKEN_ADJUST_PRIVILEGES,
+			uintptr(unsafe.Pointer(&token)),
+		)
+		if r1 == 0 {
+			return fmt.Errorf("failed to open process token: %v (Error code: %d)", err, syscall.GetLastError())
+		}
 	}
 	defer syscall.CloseHandle(token)
 
