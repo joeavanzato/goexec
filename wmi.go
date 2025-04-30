@@ -27,6 +27,24 @@ func handleWMISession(target string, batch bool, username string, password strin
 	// Basically for each command, we will append > random.txt 2>&1
 	// We will then create a batch file on the target to execute
 	// Then we will invoke the batch file remotely and wait for output
+
+	settings := &Settings{
+		User:          fmt.Sprintf("%s\\%s", domain, username),
+		Password:      password,
+		TargetShare:   "ADMIN$",
+		Target:        target,
+		UserSpecified: false,
+	}
+	if username != "" {
+		settings.UserSpecified = true
+	}
+	if !EstablishConnection(settings, "C$", true) {
+		fmt.Printf("failed to establish connection to C$ share on %s", settings.Target)
+		return
+	}
+	defer EstablishConnection(settings, "C$", false)
+	log.Printf("Successfully connected to C$ share on %s\n", target)
+
 	currentDir := "C:\\"
 	for true {
 		fmt.Printf("wmi@%s: ", target)
