@@ -16,6 +16,7 @@ import (
 
 type Settings struct {
 	UserImpersonated      syscall.Handle
+	UserSpecified         bool
 	User                  string
 	Password              string
 	TargetShare           string
@@ -25,8 +26,7 @@ type Settings struct {
 	Pipe                  string
 }
 
-func handlePipeSession(target, user, pass, domain, name, dropmethod string, runas bool) {
-	// What is the approach?
+func handlePipeSession(target, user, pass, domain, name, dropmethod string, runas, nodelete bool) {
 	pipePath := ""
 	random := getRandomString(12)
 	if name == "" {
@@ -38,11 +38,15 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 		pipePath = fmt.Sprintf(`\\.\pipe\%s`, name)
 	}
 	settings := &Settings{
-		User:        fmt.Sprintf("%s\\%s", domain, user),
-		Password:    pass,
-		TargetShare: "ADMIN$",
-		Target:      target,
-		Pipe:        name,
+		UserSpecified: false,
+		User:          fmt.Sprintf("%s\\%s", domain, user),
+		Password:      pass,
+		TargetShare:   "ADMIN$",
+		Target:        target,
+		Pipe:          name,
+	}
+	if user != "" {
+		settings.UserSpecified = true
 	}
 	if !EstablishConnection(settings, "IPC$", true) {
 		fmt.Printf("failed to establish connection to IPC$ share on %s", settings.Target)
@@ -173,7 +177,7 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 	//timeout := 10 * time.Second
 	log.Printf("Connecting to named pipe %s\n", pipePath)
 
-	fmt.Printf("Connecting to %s...\n", pipePath)
+	log.Printf("Connecting to %s...\n", pipePath)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
