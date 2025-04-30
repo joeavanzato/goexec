@@ -1,5 +1,7 @@
 package main
 
+// TODO - Delete Task if no name specified
+
 import (
 	"bufio"
 	"fmt"

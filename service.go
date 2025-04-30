@@ -1,5 +1,8 @@
 package main
 
+// TODO - Delete Service if no name specified
+// TODO - Deploy minimal binary for command-execution to avoid issues with Windows Service Parsing
+
 import (
 	"bufio"
 	"fmt"
