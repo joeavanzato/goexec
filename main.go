@@ -89,6 +89,8 @@ func main() {
 	} else if method == "tcp" {
 		// Enter full-interactive shell using TCP Client/Server - can be bind or reverse shell
 		handleTCP(target, username, password, domain, name, dropmethod, ip, shell, runas, reverse, port, nodelete, description)
+	} else if method == "mmc20" {
+		handleDCOMSession(target, username, password, domain, batch, method)
 	}
 
 }
@@ -96,7 +98,7 @@ func main() {
 func parseArgs() (map[string]any, error) {
 
 	target := flag.String("target", "", "Remote Hostname or IP address")
-	method := flag.String("method", "wmi", "Method to use for remote execution (wmi, task, service, pipe, tcp)")
+	method := flag.String("method", "wmi", "Method to use for remote execution (wmi, task, service, pipe, tcp, mmc20)")
 	batch := flag.Bool("batch", false, "If true, will copy commands to a batch file on target and execute rather than direct cmd execution - useful for long commands")
 
 	// Credentials (optional depending on run-context)
@@ -112,7 +114,7 @@ func parseArgs() (map[string]any, error) {
 	name := flag.String("name", "", "Service/Task/Pipe name to use for remote execution - if blank, will generate a random name")
 	description := flag.String("description", "", "Description for the service/task - if blank, will use a default description")
 	runas := flag.Bool("runas", false, "If true, will run the task as the user specified in -user flag instead of SYSTEM assuming the user has the correct permissions - does NOT work yet for WMI which will always run as specified user")
-	dropmethod := flag.String("dropmethod", "wmi", "Method to use for creating named pipe (wmi, task, service)")
+	dropmethod := flag.String("dropmethod", "wmi", "Method to use for creating named pipe (wmi, task, service, mmc20)")
 	reverse := flag.Bool("reverse", false, "If true, will create a reverse shell instead of bind shell - for TCP mode - must specify port")
 	port := flag.Int("port", 0, "Port to use for TCP shells - must specify port if using TCP mode")
 	ip := flag.String("ip", "0.0.0.0", "IP to use for TCP reverse shells")
@@ -120,7 +122,7 @@ func parseArgs() (map[string]any, error) {
 	nodelete := flag.Bool("nodelete", false, "If true, will not delete the task/service after execution - useful to avoid constantly creating new tasks/services if reconnecting multiple times")
 	flag.Parse()
 
-	validMethods := []string{"wmi", "task", "service", "pipe", "tcp"}
+	validMethods := []string{"wmi", "task", "service", "pipe", "tcp", "mmc20"}
 	if !slices.Contains(validMethods, *method) {
 		return nil, fmt.Errorf("invalid method: %s", *method)
 	}
@@ -128,6 +130,11 @@ func parseArgs() (map[string]any, error) {
 	validShells := []string{"cmd", "ps"}
 	if !slices.Contains(validShells, *shell) {
 		return nil, fmt.Errorf("invalid shell: %s", *shell)
+	}
+
+	dropmethods := []string{"wmi", "task", "service", "mmc20"}
+	if !slices.Contains(dropmethods, *dropmethod) {
+		return nil, fmt.Errorf("invalid dropmethod: %s", *dropmethod)
 	}
 
 	if *target == "" {

