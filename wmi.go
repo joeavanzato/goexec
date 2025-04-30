@@ -110,7 +110,6 @@ func handleWMISession(target string, batch bool, username string, password strin
 }
 
 func executeRemoteWMI(remoteHost, command, dir, username, password, domain string) error {
-	// TODO - Incorporate runas to run as specified user or as SYSTEM
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
 		return fmt.Errorf("failed to initialize COM: %v", err)
 	}
