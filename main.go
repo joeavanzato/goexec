@@ -89,7 +89,7 @@ func main() {
 func parseArgs() (map[string]any, error) {
 
 	target := flag.String("target", "", "Remote Hostname or IP address")
-	method := flag.String("method", "wmi", "Method to use for remote execution (wmi, task, service, pipe, http)")
+	method := flag.String("method", "wmi", "Method to use for remote execution (wmi, task, service, pipe, tcp)")
 	batch := flag.Bool("batch", false, "If true, will copy commands to a batch file on target and execute rather than direct cmd execution - useful for long commands")
 
 	// Credentials (optional depending on run-context)
@@ -112,7 +112,7 @@ func parseArgs() (map[string]any, error) {
 	shell := flag.String("shell", "cmd", "Shell to use for TCP shells - default is cmd.exe, valid options are (cmd, ps)")
 	flag.Parse()
 
-	validMethods := []string{"wmi", "task", "service", "pipe", "tcp", "http"}
+	validMethods := []string{"wmi", "task", "service", "pipe", "tcp"}
 	if !slices.Contains(validMethods, *method) {
 		return nil, fmt.Errorf("invalid method: %s", *method)
 	}
