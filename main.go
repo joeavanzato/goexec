@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"log"
 	"slices"
 )
 
@@ -34,7 +35,7 @@ func main() {
 	ip := args["ip"].(string)
 	shell := args["shell"].(string)
 
-	fmt.Println("Target:", target)
+	log.Printf("Target: %s, Method: %s\n", target, method)
 
 	/*	var smbsession *smb2.Session
 		var smbconn net.Conn
@@ -71,11 +72,9 @@ func main() {
 		// By default, Scheduled Task will run as SYSTEM if we have Local Admin permissions
 		// If you want to avoid this and run it as our admin account instead, pass -runas flag
 		handleTaskSession(target, batch, username, password, domain, name, description, runas)
-
 	} else if method == "service" {
 		// Enter psuedo-interactive shell using Service Control Manager
 		handleServiceSession(target, batch, username, password, domain, name, description, runas)
-
 	} else if method == "pipe" {
 		// Enter full-interactive shell using named pipes
 		handlePipeSession(target, username, password, domain, name, dropmethod, runas)
