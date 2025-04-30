@@ -283,8 +283,8 @@ func EstablishConnection(settings *Settings, resource string, connect bool) bool
 
 	remoteResource := fmt.Sprintf("\\\\%s\\%s", settings.Target, resource)
 
-	// Impersonate user if credentials provided
-	if settings.UserImpersonated == 0 && settings.User != "" {
+	// Impersonate user only if explicit credentials provided
+	if settings.UserImpersonated == 0 && settings.UserSpecified {
 		user, domain := splitUserNameAndDomain(settings.User)
 
 		var domainPtr *uint16
@@ -298,11 +298,8 @@ func EstablishConnection(settings *Settings, resource string, connect bool) bool
 
 		var token syscall.Handle
 
-		// Load logon user from advapi32.dll
-		advapi32 := syscall.NewLazyDLL("advapi32.dll")
-		logonUserW := advapi32.NewProc("LogonUserW")
-
-		r, _, err := logonUserW.Call(
+		// https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
+		r, _, err := procLogonUserW.Call(
 			uintptr(unsafe.Pointer(u)),
 			uintptr(unsafe.Pointer(domainPtr)),
 			uintptr(unsafe.Pointer(p)),
@@ -329,10 +326,6 @@ func EstablishConnection(settings *Settings, resource string, connect bool) bool
 			return true
 		}
 
-		// Establish new connection
-		mpr := syscall.NewLazyDLL("mpr.dll")
-		wNetAddConnection2 := mpr.NewProc("WNetAddConnection2W")
-
 		nr := NETRESOURCE{
 			dwType:       RESOURCETYPE_ANY,
 			lpRemoteName: syscall.StringToUTF16Ptr(remoteResource),
@@ -346,12 +339,25 @@ func EstablishConnection(settings *Settings, resource string, connect bool) bool
 			userPtr = syscall.StringToUTF16Ptr(settings.User)
 		}
 
-		ret, _, _ := wNetAddConnection2.Call(
-			uintptr(unsafe.Pointer(&nr)),
-			uintptr(unsafe.Pointer(passwordPtr)),
-			uintptr(unsafe.Pointer(userPtr)),
-			uintptr(0),
-		)
+		// https://learn.microsoft.com/en-us/windows/win32/api/winnetwk/nf-winnetwk-wnetaddconnection2w
+		var ret uintptr
+		if !settings.UserSpecified {
+			// Connecting as current user
+			ret, _, _ = procWNetAddConnection2W.Call(
+				uintptr(unsafe.Pointer(&nr)),
+				uintptr(0),
+				uintptr(0),
+				uintptr(0),
+			)
+		} else {
+			// Connecting as specified user
+			ret, _, _ = procWNetAddConnection2W.Call(
+				uintptr(unsafe.Pointer(&nr)),
+				uintptr(unsafe.Pointer(passwordPtr)),
+				uintptr(unsafe.Pointer(userPtr)),
+				uintptr(0),
+			)
+		}
 
 		if ret == NO_ERROR {
 			if strings.Contains(resource, "IPC$") {
@@ -371,11 +377,9 @@ func EstablishConnection(settings *Settings, resource string, connect bool) bool
 		}
 	} else {
 		// Disconnect
-		mpr := syscall.NewLazyDLL("mpr.dll")
-		wNetCancelConnection2 := mpr.NewProc("WNetCancelConnection2W")
-
+		// https://learn.microsoft.com/en-us/windows/win32/api/winnetwk/nf-winnetwk-wnetcancelconnection2w
 		remoteName, _ := syscall.UTF16PtrFromString(remoteResource)
-		wNetCancelConnection2.Call(
+		procWNetCancelConnection2W.Call(
 			uintptr(unsafe.Pointer(remoteName)),
 			uintptr(0),
 			uintptr(0), // FALSE
