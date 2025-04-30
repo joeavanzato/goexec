@@ -265,6 +265,7 @@ func splitUserNameAndDomain(fullUsername string) (string, string) {
 
 // EstablishConnection establishes a connection to a remote resource
 func EstablishConnection(settings *Settings, resource string, connect bool) bool {
+	// TODO - Make sure this works correctly if we don't specify user/password/domain (default process context)
 	// Already connected to self
 	if settings.Target == "." {
 		return true
