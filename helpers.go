@@ -3,10 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/hirochachacha/go-smb2"
 	"io"
 	"math/rand"
-	"net"
 	"os"
 	"strings"
 	"syscall"
@@ -89,7 +87,8 @@ func revertToSelf() {
 	procRevertToSelf.Call()
 }
 
-func getAuthenticatedSMBSession(user, pass, domain, target string) (*smb2.Session, net.Conn, error) {
+// Deprecated
+/*func getAuthenticatedSMBSession(user, pass, domain, target string) (*smb2.Session, net.Conn, error) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:445", target))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to connect to SMB server: %v", err)
@@ -108,9 +107,10 @@ func getAuthenticatedSMBSession(user, pass, domain, target string) (*smb2.Sessio
 		return nil, nil, fmt.Errorf("failed to dial SMB session: %v", err)
 	}
 	return session, conn, nil
-}
+}*/
 
-func authenticatedCopy(user string, pass string, domain string, target string, srcFile string, srcData []byte, dest string, share string) error {
+// Deprecated
+/*func authenticatedCopy(user string, pass string, domain string, target string, srcFile string, srcData []byte, dest string, share string) error {
 	// If username/password/domain are specified, use these for an authenticated SMB transfer
 	// Open raw TCP connection to SMB server (port 445)
 	fmt.Printf("Copying %s to %s on %s\n", srcFile, dest, target)
@@ -134,12 +134,12 @@ func authenticatedCopy(user string, pass string, domain string, target string, s
 	}
 	defer session.Logoff()
 
-	/*	sharenames, err := session.ListSharenames()
+		sharenames, err := session.ListSharenames()
 		if err != nil {
 			return fmt.Errorf("failed to list SMB shares: %v", err)
 		} else {
 			fmt.Println(sharenames)
-		}*/
+		}
 
 	// fmt.Sprintf("\\\\%s\\%s", target, share)
 	fmt.Println(session.ListSharenames())
@@ -186,7 +186,7 @@ func authenticatedCopy(user string, pass string, domain string, target string, s
 		return fmt.Errorf("no source file or data provided")
 	}
 	return nil
-}
+}*/
 
 func copyFile(srcFile string, srcData []byte, destFull string) error {
 	// Using current context
